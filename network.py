@@ -5,62 +5,66 @@ from generators import *
 class Network(object):
   """ Represents a binary sequence prediction network. """
 
-  def __init__(self, generator, hidden_size=5, seq_length=100):
+  def __init__(self, generator, hidden_size=15, seq_length=1000):
     self.generator = generator
     self.hidden_size = hidden_size
     self.seq_length = seq_length
 
     # Initialize and reshape input/target placeholders
     self.x = tf.placeholder(tf.float32, shape=(seq_length), name='x')
-    self.y = tf.placeholder(tf.float32, shape=(seq_length), name='y')
+    self.y = tf.placeholder(tf.float32, shape=(seq_length, 2), name='y')
 
     self.x = tf.reshape(self.x, (seq_length, 1, 1))
-    self.y = tf.reshape(self.y, (seq_length, 1))
 
     # Set up LSTM and output layer
     self.lstm = tf.nn.rnn_cell.BasicLSTMCell(hidden_size, state_is_tuple=True)
 
-    self.weights = tf.Variable(tf.random_normal([self.hidden_size, 1]))
-    self.biases = tf.Variable(tf.random_normal([1]))
+    self.weights = tf.Variable(tf.random_normal([self.hidden_size, 2]))
+    self.biases = tf.Variable(tf.random_normal([2]))
 
     lstm_output, _ = tf.nn.dynamic_rnn(self.lstm, self.x,
       sequence_length=[self.seq_length], dtype=tf.float32, time_major=True)
     lstm_output = tf.reshape(lstm_output, [seq_length, hidden_size])
-    self.predict = tf.tanh(tf.matmul(lstm_output, self.weights) + self.biases)
+    linear_output = tf.tanh(tf.matmul(lstm_output, self.weights) + self.biases)
+    self.predict = tf.nn.softmax(linear_output)
 
     # Set up the cost function
-    predicted_distribution = self._convert_to_distribution(self.predict)
-    target_distribution = self._convert_to_distribution(self.y)
-    self.cost = -tf.reduce_sum(
-      target_distribution * tf.log(predicted_distribution))
+    self.cost = -tf.reduce_sum(self.y * tf.log(self.predict))
 
-  def _convert_to_distribution(self, tensor):
-    """ Converts an n x 1 tensor of values in [-1, 1] to a n x 2 tensor of
-    probability distributions (for -1/1). """
-    positive_probability = (tensor + 1) / 2
-    negative_probability = 1 - positive_probability
+    # TensorBoard summaries
+    tf.scalar_summary('cost', self.cost)
+    tf.histogram_summary('probability', self.predict[:,0])
 
-    return tf.concat(1, [positive_probability, negative_probability])
-
-  def train(self, steps=100000, learning_rate=1e-2):
+  def train(self, steps=100000, learning_rate=1e-3):
     optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate) \
                         .minimize(self.cost)
 
     with tf.Session() as sess:
+      self.sess = sess
+
+      summaries = tf.merge_all_summaries()
+      summary_writer = tf.train.SummaryWriter('/tmp/sequence-prediction', sess.graph)
+
       sess.run(tf.initialize_all_variables())
+
       for step in range(steps):
+        self.generator.reset()
         actual = self.generator.next(self.seq_length+1)
 
-        sess.run(optimizer, feed_dict={'x:0': actual[:-1], 'y:0': actual[1:]})
+        summary, _ = sess.run([summaries, optimizer], feed_dict={'x:0': actual[0][:-1], 'y:0': actual[1][1:]})
+        summary_writer.add_summary(summary, step)
+
+        # if step % 100 == 0:
+        #   print sess.run(self.predict,
+        #     feed_dict={'x:0': actual[0][:-1], 'y:0': actual[1][1:]})
+        #   print actual[0][:-1]
 
         if step % 10 == 0:
           print 'Step %d: %f' % (step, sess.run(self.cost,
-            feed_dict={'x:0': actual[:-1], 'y:0': actual[1:]}))
-          # print sess.run(self.predict,
-          #   feed_dict={'x:0': actual[:-1], 'y:0': actual[1:]})
+            feed_dict={'x:0': actual[0][:-1], 'y:0': actual[1][1:]}))
 
 def main():
-  network = Network(AlternatingGenerator())
+  network = Network(DeterministicStateMachineGenerator(10))
   network.train()
 
 if __name__ == '__main__':
