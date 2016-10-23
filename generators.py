@@ -34,13 +34,13 @@ class DeterministicStateMachineGenerator(object):
 		self.n = n
 
 		expected_shape = (2 ** n, 2)
-		if transition_matrix:
+		if transition_matrix != None:
 			assert transition_matrix.shape == expected_shape, ('Transition matrix ',
 				' must be of dimensions (%d, %d), not (%d, %d)') % (expected_shape[0],
 				expected_shape[1], n.shape[0], n.shape[1])
 				# TODO: Assert transition probabilities are 0 or 1
 
-		if not transition_matrix:
+		if transition_matrix == None:
 			transition_matrix = self.generate_transition_matrix(expected_shape)
 
 		self.transition_matrix = transition_matrix
